@@ -1,11 +1,11 @@
-from datetime import datetime, timedelta, date
-from dateutil.relativedelta import relativedelta
+from collections import Counter
+from datetime import date, datetime, timedelta
 
+from dateutil.relativedelta import relativedelta
 from flask import Blueprint, jsonify, request
 from sqlalchemy import text
 
 from api.config import get_connection
-
 
 kunjungan_bp = Blueprint("kunjungan", __name__)
 engine = get_connection()
@@ -19,10 +19,28 @@ def get_default_date(tgl_awal, tgl_akhir):
         tgl_awal = datetime.strptime(tgl_awal, '%Y-%m-%d')
 
     if tgl_akhir == None:
-        tgl_akhir = datetime.strptime(datetime.today().strftime('%Y-%m-%d'), '%Y-%m-%d')
+        tgl_akhir = datetime.strptime(datetime.today().strftime('%Y-%m-%d'),
+                                      '%Y-%m-%d')
     else:
         tgl_akhir = datetime.strptime(tgl_akhir, '%Y-%m-%d')
     return tgl_awal, tgl_akhir
+
+
+def get_categorical_age(birth_date):
+    today = date.today()
+    age = today.year - birth_date.year - ((today.month, today.day) <
+                                          (birth_date.month, birth_date.day))
+    category = '<5' if age<5 else '5-14' if age>=5 and age<15 else '15-24' if age>=15 and age<=24 \
+            else '25-34' if age>=25 and age<=34 else '35-44' if age>=35 and age<=44 else '45-54' if age>=45 and age<=54 \
+            else '55-64' if age>=55 and age<=64 else '>65'
+    return category
+
+
+def count_values(data, param):
+    cnt = Counter()
+    for i in range(len(data)):
+        cnt[data[i][param].lower().replace(' ', '_')] += 1
+    return cnt
 
 
 @kunjungan_bp.route('/card_pasien')
@@ -31,11 +49,12 @@ def card_pasien():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, r.NamaRuangan
+        text(f"""SELECT pd.TglPendaftaran, i.NamaInstalasi
             FROM rsudtasikmalaya.dbo.PasienDaftar pd
             INNER JOIN rsudtasikmalaya.dbo.Ruangan r
             ON pd.KdRuanganAkhir  = r.KdRuangan  
+            INNER JOIN rsudtasikmalaya.dbo.Instalasi i
+            ON r.KdInstalasi = i.KdInstalasi
             WHERE pd.TglPendaftaran >= '{tgl_awal}'
             AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
             ORDER BY pd.TglPendaftaran ASC;"""))
@@ -43,11 +62,18 @@ def card_pasien():
     for row in result:
         data.append({
             "tanggal": row['TglPendaftaran'],
-            "ruangan": row['NamaRuangan'].split("\r")[0],
-            "judul": "Ruangan (Card Kunjungan)",
-            "label": "Kunjungan Pasien"
-            })
-    return jsonify(data)
+            "instalasi": row['NamaInstalasi'].split("\r")[0]
+        })
+    result = {
+        "judul": 'Instalasi (Card Kunjungan)',
+        "label": 'Kunjungan Pasien',
+        "instalasi": count_values(data, 'instalasi'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 # Detail Card kunjungan (pop up table)
@@ -71,13 +97,13 @@ def detail_card_pasien():
             "tanggal": row['TglPendaftaran'],
             "no_daftar": row['NoPendaftaran'],
             "no_cm": row['NoCM'],
-            "nama": row['Title']+' '+row['NamaLengkap'],
+            "nama": row['Title'] + ' ' + row['NamaLengkap'],
             "tgl_lahir": row['TglLahir'],
             "jenis_kelamin": row['JenisKelamin'],
             "alamat": row['Alamat'],
             "judul": "Detail (Card Kunjungan)",
             "label": "Kunjungan Pasien"
-            })
+        })
     return jsonify(data)
 
 
@@ -87,8 +113,7 @@ def kelas_perawatan():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, kp.DeskKelas as NamaKelas
+        text(f"""SELECT pd.TglPendaftaran, kp.DeskKelas as NamaKelas
             FROM dbo.PasienDaftar pd
             INNER JOIN dbo.KelasPelayanan kp
             ON pd.KdKelasAkhir = kp.KdKelas
@@ -99,11 +124,18 @@ def kelas_perawatan():
     for row in result:
         data.append({
             "tanggal": row['TglPendaftaran'],
-            "kelas": row['NamaKelas'],
-            "judul": "Kelas Perawatan",
-            "label": "Kunjungan Pasien"
-            })
-    return jsonify(data)
+            "kelas": row['NamaKelas']
+        })
+    result = {
+        "judul": "Kelas Perawatan",
+        "label": "Kunjungan Pasien",
+        "kelas": count_values(data, 'kelas'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 @kunjungan_bp.route('/kelompok_pasien')
@@ -112,8 +144,7 @@ def kelompok_pasien():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, kp.JenisPasien as KelompokPasien
+        text(f"""SELECT pd.TglPendaftaran, kp.JenisPasien as KelompokPasien
             FROM dbo.PasienDaftar pd
             INNER JOIN dbo.KelompokPasien kp
             ON pd.KdKelasAkhir = kp.KdKelompokPasien
@@ -124,11 +155,18 @@ def kelompok_pasien():
     for row in result:
         data.append({
             "tanggal": row['TglPendaftaran'],
-            "kelompok": row['KelompokPasien'],
-            "judul": 'Kelompok Pasien',
-            "label": 'Kunjungan Pasien'
+            "kelompok": row['KelompokPasien']
         })
-    return jsonify(data)
+    result = {
+        "judul": 'Kelompok Pasien',
+        "label": 'Kunjungan Pasien',
+        "kelompok": count_values(data, 'kelompok'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 @kunjungan_bp.route('/rujukan')
@@ -137,8 +175,7 @@ def rujukan():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, ra.RujukanAsal
+        text(f"""SELECT pd.TglPendaftaran, ra.RujukanAsal
             FROM dbo.PasienDaftar pd
             INNER JOIN dbo.Rujukan r
             ON pd.NoCM = r.NoCM
@@ -151,11 +188,18 @@ def rujukan():
     for row in result:
         data.append({
             "tanggal": row['TglPendaftaran'],
-            "rujukan": row['RujukanAsal'],
-            "judul": 'Rujukan Asal Pasien',
-            "label": 'Kunjungan Pasien'
+            "rujukan": row['RujukanAsal']
         })
-    return jsonify(data)
+    result = {
+        "judul": 'Rujukan Asal Pasien',
+        "label": 'Kunjungan Pasien',
+        "rujukan": count_values(data, 'rujukan'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 @kunjungan_bp.route('/status_pulang')
@@ -164,8 +208,7 @@ def status_pulang():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pp.TglPulang, sp.StatusPulang
+        text(f"""SELECT pp.TglPulang, sp.StatusPulang
             FROM dbo.StatusPulang sp
             INNER JOIN dbo.PasienPulang pp
             ON sp.KdStatusPulang = pp.KdStatusPulang
@@ -176,11 +219,18 @@ def status_pulang():
     for row in result:
         data.append({
             "tanggal": row['TglPulang'],
-            "status": row['StatusPulang'],
-            "judul": 'Status Pulang',
-            "label": 'Kunjungan Pasien'
+            "status": row['StatusPulang']
         })
-    return jsonify(data)
+    result = {
+        "judul": 'Status Pulang',
+        "label": 'Kunjungan Pasien',
+        "status": count_values(data, 'status'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 @kunjungan_bp.route('/umur_jenis_kelamin')
@@ -189,8 +239,7 @@ def umur_jenis_kelamin():
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
     result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, p.TglLahir, p.JenisKelamin
+        text(f"""SELECT pd.TglPendaftaran, p.TglLahir, p.JenisKelamin
             FROM dbo.PasienDaftar pd
             INNER JOIN dbo.Pasien p
             ON pd.NoCM = p.NoCM 
@@ -199,16 +248,22 @@ def umur_jenis_kelamin():
             ORDER BY pd.TglPendaftaran ASC;"""))
     data = []
     for row in result:
-        today = date.today()
-        age = today.year - row['TglLahir'].year - ((today.month, today.day) < (row['TglLahir'].month, row['TglLahir'].day))
         data.append({
             "tanggal": row['TglPendaftaran'],
-            "umur": age,
-            "jenis_kelamin": row['JenisKelamin'],
-            "judul": 'Umur dan Jenis Kelamin',
-            "label": 'Kunjungan Pasien'
+            "umur": get_categorical_age(row['TglLahir']),
+            "jenis_kelamin": row['JenisKelamin']
         })
-    return jsonify(data)
+    result = {
+        "judul": 'Umur dan Jenis Kelamin',
+        "label": 'Kunjungan Pasien',
+        "jenis_kelamin": count_values(data, 'jenis_kelamin'),
+        "umur": count_values(data, 'umur'),
+        "tgl_filter": {
+            "tgl_awal": tgl_awal,
+            "tgl_akhir": tgl_akhir
+        }
+    }
+    return jsonify(result)
 
 
 @kunjungan_bp.route('/pendidikan')
