@@ -43,7 +43,7 @@ def count_values(data, param):
     return cnt
 
 
-@kunjungan_bp.route('/card_pasien')
+@kunjungan_bp.route('/kunjungan/card_pasien')
 def card_pasien():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -77,7 +77,7 @@ def card_pasien():
 
 
 # Detail Card kunjungan (pop up table)
-@kunjungan_bp.route('/detail_card_pasien')
+@kunjungan_bp.route('/kunjungan/detail_card_pasien')
 def detail_card_pasien():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -107,7 +107,7 @@ def detail_card_pasien():
     return jsonify(data)
 
 
-@kunjungan_bp.route('/kelas_perawatan')
+@kunjungan_bp.route('/kunjungan/kelas_perawatan')
 def kelas_perawatan():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -138,7 +138,7 @@ def kelas_perawatan():
     return jsonify(result)
 
 
-@kunjungan_bp.route('/kelompok_pasien')
+@kunjungan_bp.route('/kunjungan/kelompok_pasien')
 def kelompok_pasien():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -169,7 +169,7 @@ def kelompok_pasien():
     return jsonify(result)
 
 
-@kunjungan_bp.route('/rujukan')
+@kunjungan_bp.route('/kunjungan/rujukan')
 def rujukan():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -202,7 +202,7 @@ def rujukan():
     return jsonify(result)
 
 
-@kunjungan_bp.route('/status_pulang')
+@kunjungan_bp.route('/kunjungan/status_pulang')
 def status_pulang():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -233,7 +233,7 @@ def status_pulang():
     return jsonify(result)
 
 
-@kunjungan_bp.route('/umur_jenis_kelamin')
+@kunjungan_bp.route('/kunjungan/umur_jenis_kelamin')
 def umur_jenis_kelamin():
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
@@ -266,11 +266,11 @@ def umur_jenis_kelamin():
     return jsonify(result)
 
 
-@kunjungan_bp.route('/pendidikan')
+@kunjungan_bp.route('/kunjungan/pendidikan')
 def pendidikan():
     return jsonify({"response": "ini data pendidikan"})
 
 
-@kunjungan_bp.route('/pekerjaan')
+@kunjungan_bp.route('/kunjungan/pekerjaan')
 def pekerjaan():
     return jsonify({"response": "ini data pekerjaan"})
