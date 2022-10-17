@@ -3,9 +3,9 @@ from datetime import date, datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, jsonify, request
-from sqlalchemy import text
 
 from api.config import get_connection
+from api.query import *
 
 kunjungan_bp = Blueprint("kunjungan", __name__)
 engine = get_connection()
@@ -13,16 +13,22 @@ engine = get_connection()
 
 def get_default_date(tgl_awal, tgl_akhir):
     if tgl_awal == None:
-        tgl_awal = datetime.today() - relativedelta(months=1)
-        tgl_awal = tgl_awal.strftime('%Y-%m-%d')
+        tgl_awal = datetime.strptime((datetime.today() - relativedelta(months=1)).strftime('%Y-%m-%d'), '%Y-%m-%d')
     else:
         tgl_awal = datetime.strptime(tgl_awal, '%Y-%m-%d')
 
     if tgl_akhir == None:
-        tgl_akhir = datetime.strptime(datetime.today().strftime('%Y-%m-%d'),
-                                      '%Y-%m-%d')
+        tgl_akhir = datetime.strptime(datetime.today().strftime('%Y-%m-%d'), '%Y-%m-%d')
     else:
         tgl_akhir = datetime.strptime(tgl_akhir, '%Y-%m-%d')
+    return tgl_awal, tgl_akhir
+
+
+def get_date_prev(tgl_awal, tgl_akhir):
+    tgl_awal = tgl_awal - relativedelta(months=1)
+    tgl_awal = tgl_awal.strftime('%Y-%m-%d')
+    tgl_akhir = tgl_akhir - relativedelta(months=1)
+    tgl_akhir = tgl_akhir.strftime('%Y-%m-%d')
     return tgl_awal, tgl_akhir
 
 
@@ -39,35 +45,50 @@ def get_categorical_age(birth_date):
 def count_values(data, param):
     cnt = Counter()
     for i in range(len(data)):
-        cnt[data[i][param].lower().replace(' ', '_')] += 1
+        # cnt[data[i][param].lower().replace(' ', '_')] += 1
+        cnt[data[i][param]] += 1
     return cnt
 
 
 @kunjungan_bp.route('/kunjungan/card_pasien')
 def card_pasien():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pd.TglPendaftaran, i.NamaInstalasi
-            FROM rsudtasikmalaya.dbo.PasienDaftar pd
-            INNER JOIN rsudtasikmalaya.dbo.Ruangan r
-            ON pd.KdRuanganAkhir  = r.KdRuangan  
-            INNER JOIN rsudtasikmalaya.dbo.Instalasi i
-            ON r.KdInstalasi = i.KdInstalasi
-            WHERE pd.TglPendaftaran >= '{tgl_awal}'
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPendaftaran'],
-            "instalasi": row['NamaInstalasi'].split("\r")[0]
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_card_pasien(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_card_pasien(tgl_awal, tgl_akhir + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPendaftaran'], "instalasi": row['NamaInstalasi'].split("\r")[0]} for row in result]
+    tmp_prev = [{"tanggal": row['TglPendaftaran'], "instalasi": row['NamaInstalasi'].split("\r")[0]} for row in result_prev]   
+
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'instalasi')
+    cnts_prev = count_values(tmp_prev, 'instalasi')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+    
+    # Define return result as a json
     result = {
-        "judul": 'Instalasi (Card Kunjungan)',
-        "label": 'Kunjungan Pasien',
-        "instalasi": count_values(data, 'instalasi'),
+        "judul": "Instalasi (Card Kunjungan)",
+        "label": "Kunjungan Pasien",
+        "data": data, #count_values(tmp, 'instalasi'),
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
@@ -79,18 +100,15 @@ def card_pasien():
 # Detail Card kunjungan (pop up table)
 @kunjungan_bp.route('/kunjungan/detail_card_pasien')
 def detail_card_pasien():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(
-            f"""SELECT pd.TglPendaftaran, pd.NoPendaftaran, pd.NoCM, p.Title, p.NamaLengkap, p.TglLahir, p.JenisKelamin, p.Alamat
-            FROM rsudtasikmalaya.dbo.PasienDaftar pd
-            INNER JOIN rsudtasikmalaya.dbo.Pasien p
-            ON pd.NoCM  = p.NoCM
-            WHERE pd.TglPendaftaran >= '{tgl_awal}'
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
+
+    # Get query result
+    result = query_detail_card_pasien(tgl_awal, tgl_akhir + timedelta(days=1))
+    
+    # Define return result as a json
     data = []
     for row in result:
         data.append({
@@ -109,27 +127,43 @@ def detail_card_pasien():
 
 @kunjungan_bp.route('/kunjungan/kelas_perawatan')
 def kelas_perawatan():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pd.TglPendaftaran, kp.DeskKelas as NamaKelas
-            FROM dbo.PasienDaftar pd
-            INNER JOIN dbo.KelasPelayanan kp
-            ON pd.KdKelasAkhir = kp.KdKelas
-            WHERE pd.TglPendaftaran >= '{tgl_awal}'
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPendaftaran'],
-            "kelas": row['NamaKelas']
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_kelas_perawatan(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_kelas_perawatan(tgl_awal, tgl_akhir + timedelta(days=1))
+
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPendaftaran'], "kelas": row['NamaKelas']} for row in result]
+    tmp_prev = [{"tanggal": row['TglPendaftaran'], "kelas": row['NamaKelas']} for row in result_prev]
+    
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'kelas')
+    cnts_prev = count_values(tmp_prev, 'kelas')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+    
+    # Define return result as a json
     result = {
         "judul": "Kelas Perawatan",
         "label": "Kunjungan Pasien",
-        "kelas": count_values(data, 'kelas'),
+        "data": data, #count_values(tmp, 'kelas'),
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
@@ -140,27 +174,43 @@ def kelas_perawatan():
 
 @kunjungan_bp.route('/kunjungan/kelompok_pasien')
 def kelompok_pasien():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pd.TglPendaftaran, kp.JenisPasien as KelompokPasien
-            FROM dbo.PasienDaftar pd
-            INNER JOIN dbo.KelompokPasien kp
-            ON pd.KdKelasAkhir = kp.KdKelompokPasien
-            WHERE pd.TglPendaftaran >= '{tgl_awal}'
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPendaftaran'],
-            "kelompok": row['KelompokPasien']
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_kelompok_pasien(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_kelompok_pasien(tgl_awal, tgl_akhir + timedelta(days=1))
+    
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPendaftaran'], "kelompok": row['KelompokPasien']} for row in result]
+    tmp_prev = [{"tanggal": row['TglPendaftaran'], "kelompok": row['KelompokPasien']} for row in result_prev]
+    
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'kelompok')
+    cnts_prev = count_values(tmp_prev, 'kelompok')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+
+    # Define return result as a json
     result = {
         "judul": 'Kelompok Pasien',
         "label": 'Kunjungan Pasien',
-        "kelompok": count_values(data, 'kelompok'),
+        "data": data, #count_values(tmp, 'kelas'),
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
@@ -171,29 +221,43 @@ def kelompok_pasien():
 
 @kunjungan_bp.route('/kunjungan/rujukan')
 def rujukan():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pd.TglPendaftaran, ra.RujukanAsal
-            FROM dbo.PasienDaftar pd
-            INNER JOIN dbo.Rujukan r
-            ON pd.NoCM = r.NoCM
-            INNER JOIN dbo.RujukanAsal ra
-            ON r.KdRujukanAsal = ra.KdRujukanAsal
-            WHERE pd.TglPendaftaran >= '{tgl_awal}'
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPendaftaran'],
-            "rujukan": row['RujukanAsal']
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_rujukan(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_rujukan(tgl_awal, tgl_akhir + timedelta(days=1))
+    
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPendaftaran'], "rujukan": row['RujukanAsal']} for row in result]
+    tmp_prev = [{"tanggal": row['TglPendaftaran'], "rujukan": row['RujukanAsal']} for row in result_prev]
+    
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'rujukan')
+    cnts_prev = count_values(tmp_prev, 'rujukan')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+
+    # Define return result as a json
     result = {
         "judul": 'Rujukan Asal Pasien',
         "label": 'Kunjungan Pasien',
-        "rujukan": count_values(data, 'rujukan'),
+        "data": data, #count_values(data, 'rujukan'),
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
@@ -204,27 +268,43 @@ def rujukan():
 
 @kunjungan_bp.route('/kunjungan/status_pulang')
 def status_pulang():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pp.TglPulang, sp.StatusPulang
-            FROM dbo.StatusPulang sp
-            INNER JOIN dbo.PasienPulang pp
-            ON sp.KdStatusPulang = pp.KdStatusPulang
-            WHERE pp.TglPulang >= '{tgl_awal}'
-            AND pp.TglPulang < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pp.TglPulang ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPulang'],
-            "status": row['StatusPulang']
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_status_pulang(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_status_pulang(tgl_awal, tgl_akhir + timedelta(days=1))
+  
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPulang'], "status": row['StatusPulang']} for row in result]
+    tmp_prev = [{"tanggal": row['TglPulang'], "status": row['StatusPulang']} for row in result_prev]
+        
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'status')
+    cnts_prev = count_values(tmp_prev, 'status')
+    data = [{"name": x, "value": y} for x, y in cnts.items()]
+    data_prev = [{"name": x, "value": y} for x, y in cnts_prev.items()]
+
+    # Define trend percentage
+    for i in range(len(cnts)):
+        percentage = None
+        for j in range(len(cnts_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+
+    # Define return result as a json
     result = {
         "judul": 'Status Pulang',
         "label": 'Kunjungan Pasien',
-        "status": count_values(data, 'status'),
+        "data": data, #count_values(data, 'status'),
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
@@ -235,29 +315,65 @@ def status_pulang():
 
 @kunjungan_bp.route('/kunjungan/umur_jenis_kelamin')
 def umur_jenis_kelamin():
+    # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
     tgl_akhir = request.args.get('tgl_akhir')
     tgl_awal, tgl_akhir = get_default_date(tgl_awal, tgl_akhir)
-    result = engine.execute(
-        text(f"""SELECT pd.TglPendaftaran, p.TglLahir, p.JenisKelamin
-            FROM dbo.PasienDaftar pd
-            INNER JOIN dbo.Pasien p
-            ON pd.NoCM = p.NoCM 
-            WHERE pd.TglPendaftaran >= '{tgl_awal}' 
-            AND pd.TglPendaftaran < '{tgl_akhir + timedelta(days=1)}'
-            ORDER BY pd.TglPendaftaran ASC;"""))
-    data = []
-    for row in result:
-        data.append({
-            "tanggal": row['TglPendaftaran'],
-            "umur": get_categorical_age(row['TglLahir']),
-            "jenis_kelamin": row['JenisKelamin']
-        })
+    tgl_awal_prev, tgl_akhir_prev = get_date_prev(tgl_awal, tgl_akhir)
+
+    # Get query result
+    result_prev = query_umur_jenis_kelamin(tgl_awal_prev, datetime.strptime(tgl_akhir_prev, '%Y-%m-%d') + timedelta(days=1))
+    result = query_umur_jenis_kelamin(tgl_awal, tgl_akhir + timedelta(days=1))
+    
+    # Extract data by date (dict)
+    tmp = [{"tanggal": row['TglPendaftaran'], "umur": get_categorical_age(row['TglLahir']), "jenis_kelamin": row['JenisKelamin']} for row in result]
+    tmp_prev = [{"tanggal": row['TglPendaftaran'], "umur": get_categorical_age(row['TglLahir']), "jenis_kelamin": row['JenisKelamin']} for row in result_prev]
+  
+    # Extract data as (dataframe)
+    cnts = count_values(tmp, 'umur')
+    data, data_prev = [], []
+    kategori_umur = [x for x, y in cnts.items()]
+    for i in kategori_umur:
+        p = 0
+        l = 0
+        for j in range(len(tmp)):
+            if tmp[j]['umur'] == i and tmp[j]['jenis_kelamin'] == 'P':
+                p += 1
+            elif tmp[j]['umur'] == i and tmp[j]['jenis_kelamin'] == 'L':
+                l += 1
+            else:
+                pass
+        data.append({"name": i, "value": l+p, "laki_laki": l, "perempuan": p})
+
+    for i in kategori_umur:
+        p = 0
+        l = 0
+        for j in range(len(tmp_prev)):
+            if tmp_prev[j]['umur'] == i and tmp_prev[j]['jenis_kelamin'] == 'P':
+                p += 1
+            elif tmp_prev[j]['umur'] == i and tmp_prev[j]['jenis_kelamin'] == 'L':
+                l += 1
+            else:
+                pass
+        data_prev.append({"name": i, "value": l+p, "laki_laki": l, "perempuan": p})
+    
+    # Define trend percentage
+    for i in range(len(data)):
+        percentage = None
+        for j in range(len(data_prev)):
+            if data[i]["name"] == data_prev[j]["name"]:
+                percentage = (data[i]["value"] - data_prev[j]["value"]) / data[i]["value"]
+            try:
+                data[i]["trend"] = round(percentage, 3)
+            except:
+                data[i]["trend"] = percentage
+        data[i]["predict"] = None
+
+    # Define return result as a json
     result = {
         "judul": 'Umur dan Jenis Kelamin',
         "label": 'Kunjungan Pasien',
-        "jenis_kelamin": count_values(data, 'jenis_kelamin'),
-        "umur": count_values(data, 'umur'),
+        "data": data,
         "tgl_filter": {
             "tgl_awal": tgl_awal,
             "tgl_akhir": tgl_akhir
