@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
 from flask import Blueprint, jsonify, request
-
+from flask_jwt_extended import jwt_required
 from api.query import *
 
 kunjungan_bp = Blueprint("kunjungan", __name__)
@@ -49,6 +49,7 @@ def count_values(data, param):
 
 
 @kunjungan_bp.route('/kunjungan/card_pasien')
+@jwt_required()
 def card_pasien():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -97,6 +98,7 @@ def card_pasien():
 
 # Detail Card kunjungan (pop up table)
 @kunjungan_bp.route('/kunjungan/detail_card_pasien')
+@jwt_required()
 def detail_card_pasien():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -124,6 +126,7 @@ def detail_card_pasien():
 
 
 @kunjungan_bp.route('/kunjungan/kelas_perawatan')
+@jwt_required()
 def kelas_perawatan():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -171,6 +174,7 @@ def kelas_perawatan():
 
 
 @kunjungan_bp.route('/kunjungan/kelompok_pasien')
+@jwt_required()
 def kelompok_pasien():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -218,6 +222,7 @@ def kelompok_pasien():
 
 
 @kunjungan_bp.route('/kunjungan/rujukan')
+@jwt_required()
 def rujukan():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -265,6 +270,7 @@ def rujukan():
 
 
 @kunjungan_bp.route('/kunjungan/status_pulang')
+@jwt_required()
 def status_pulang():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -312,6 +318,7 @@ def status_pulang():
 
 
 @kunjungan_bp.route('/kunjungan/umur_jenis_kelamin')
+@jwt_required()
 def umur_jenis_kelamin():
     # Date Initialization
     tgl_awal = request.args.get('tgl_awal')
@@ -381,10 +388,20 @@ def umur_jenis_kelamin():
 
 
 @kunjungan_bp.route('/kunjungan/pendidikan')
+@jwt_required()
 def pendidikan():
-    return jsonify({"response": "ini data pendidikan"})
+    ress = query_pendidikan().fetchone()[0]
+    a = queries(ress, start_date='2018-1-1', end_date='2018-1-5')#.fetchone()[0]
+    print(a)
+    # data = [{"tanggal": row['TglPendaftaran'], "instalasi": row['NamaInstalasi'].split("\r")[0]} for row in a]
+
+
+    return "a"
+    # print(ress)
+    # return jsonify({"response": ress})
 
 
 @kunjungan_bp.route('/kunjungan/pekerjaan')
+@jwt_required()
 def pekerjaan():
     return jsonify({"response": "ini data pekerjaan"})

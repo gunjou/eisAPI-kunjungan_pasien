@@ -5,6 +5,15 @@ from api.config import get_connection
 engine = get_connection()
 
 
+def get_data(public_id):  # Login
+    result = engine.execute(
+        text(f"""SELECT * FROM UsersAuth ua 
+        JOIN RumahSakit_m rsm 
+        ON rsm.id_rs = ua.id_rs 
+        WHERE ua.public_id = '{public_id}';"""))
+    return result
+
+
 def query_card_pasien(start_date, end_date):
     result = engine.execute(
         text(f"""SELECT pd.TglPendaftaran, i.NamaInstalasi
@@ -91,3 +100,22 @@ def query_umur_jenis_kelamin(start_date, end_date):
             AND pd.TglPendaftaran < '{end_date}'
             ORDER BY pd.TglPendaftaran ASC;"""))
     return result
+
+
+def query_pendidikan():
+    result = engine.execute(
+        text(f"""SELECT qr.query
+            FROM eis_jasamedika.dbo.QueryRS qr
+            WHERE id_rs = 3206011 AND id_diagram = 1101;"""))
+    return result
+
+
+def queries(query, **date):
+    start_date = date['start_date']
+    end_date = date['end_date']
+    # q = query
+    # result = q
+    t = text(query)
+    result = engine.execute(t, start_date=start_date, end_date=end_date)
+    # print(date['start_date'])
+    return query
